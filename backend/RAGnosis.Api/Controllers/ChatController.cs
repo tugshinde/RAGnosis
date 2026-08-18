@@ -22,6 +22,7 @@ public sealed class ChatController(
     IKnowledgeRetrievalService retrieval,
     ILlmService llm,
     ICurrentUser currentUser,
+    IAuditService audit,
     ILogger<ChatController> logger) : ApiControllerBase(currentUser)
 {
     private const int HistoryTurns = 8;
@@ -60,6 +61,9 @@ public sealed class ChatController(
 
             if (report.UserId != userId && !CurrentUser.IsInRole(Roles.Doctor, Roles.Admin))
                 return ForbiddenError("You do not have access to this report.");
+
+            // The prompt carries the report's measured values, so this is a read of clinical data.
+            await audit.RecordAsync(AuditActions.ChatOnReport, report.UserId, report.Id, ct: ct);
         }
 
         var passages = await retrieval.RetrieveAsync(request.Message, topK: 4, ct);

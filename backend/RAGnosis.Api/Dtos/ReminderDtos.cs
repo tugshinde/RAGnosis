@@ -6,6 +6,7 @@ namespace RAGnosis.Api.Dtos;
 public sealed class ReminderListResponse
 {
     public List<ReminderResponse> Reminders { get; set; } = [];
+    public PageInfo? Pagination { get; set; }
 }
 
 public sealed class CreateReminderRequest

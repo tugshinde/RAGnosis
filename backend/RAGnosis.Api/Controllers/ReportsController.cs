@@ -17,6 +17,7 @@ public sealed class ReportsController(
     IFileStorageService storage,
     ReportAnalysisService analysis,
     ICurrentUser currentUser,
+    IAuditService audit,
     ILogger<ReportsController> logger) : ApiControllerBase(currentUser)
 {
     /// <summary>Uploads a report and runs the analysis pipeline over it.</summary>
@@ -34,6 +35,8 @@ public sealed class ReportsController(
             return BadRequest(new ApiError("unreadable", reason!));
 
         var report = await CreateAndAnalyzeAsync(request.File, userId, request.ReportType, ct);
+
+        await audit.RecordAsync(AuditActions.ReportUpload, userId, report.Id, ct: ct);
 
         // The dashboard shows a dedicated panel when a report can't be read at all.
         if (report.Status == ReportStatus.Failed)
@@ -96,24 +99,36 @@ public sealed class ReportsController(
     }
 
     [HttpGet("")]
-    public async Task<ActionResult<ReportListResponse>> List(CancellationToken ct)
+    public async Task<ActionResult<ReportListResponse>> List(
+        [FromQuery(Name = "")] PageRequest paging, CancellationToken ct)
     {
         if (!TryGetUserId(out var userId, out var error)) return error!;
 
-        var reports = await context.Reports
-            .Find(r => r.UserId == userId)
+        var query = context.Reports.Find(r => r.UserId == userId);
+
+        var total = await query.CountDocumentsAsync(ct);
+
+        var reports = await query
             .SortByDescending(r => r.UploadedAt)
-            .Limit(200)
+            .Skip(paging.Skip)
+            .Limit(paging.Size)
             .ToListAsync(ct);
 
-        return Ok(new ReportListResponse { Reports = reports.Select(ReportMapper.Map).ToList() });
+        return Ok(new ReportListResponse
+        {
+            Reports = reports.Select(ReportMapper.Map).ToList(),
+            Pagination = PageInfo.From(paging, total)
+        });
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<ReportResponse>> GetById(string id, CancellationToken ct)
     {
         var (report, failure) = await LoadOwnedReportAsync(id, ct);
-        return failure ?? Ok(ReportMapper.Map(report!));
+        if (failure is not null) return failure;
+
+        await audit.RecordAsync(AuditActions.ReportRead, report!.UserId, report.Id, ct: ct);
+        return Ok(ReportMapper.Map(report));
     }
 
     /// <summary>Streams the originally uploaded file back to its owner.</summary>
@@ -126,6 +141,10 @@ public sealed class ReportsController(
         var stream = await storage.OpenReadAsync(report!.StoredPath, ct);
         if (stream is null)
             return NotFoundError("The stored file is no longer available.");
+
+        // Recorded before streaming: once the body starts the response cannot be failed,
+        // and an unrecorded download is exactly what the trail exists to catch.
+        await audit.RecordAsync(AuditActions.ReportDownload, report.UserId, report.Id, ct: ct);
 
         return File(stream, report.ContentType ?? "application/octet-stream", report.OriginalName);
     }
@@ -157,6 +176,8 @@ public sealed class ReportsController(
 
         try { storage.Delete(report!.StoredPath); }
         catch (Exception ex) { logger.LogWarning(ex, "Could not delete stored file for report {ReportId}.", report!.Id); }
+
+        await audit.RecordAsync(AuditActions.ReportDelete, report!.UserId, report.Id, ct: ct);
 
         return Ok(new { message = "Report deleted." });
     }

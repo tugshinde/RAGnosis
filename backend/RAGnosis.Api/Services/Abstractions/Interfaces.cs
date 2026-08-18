@@ -16,6 +16,21 @@ public interface ICurrentUser
     bool IsInRole(params string[] roles);
 }
 
+/// <summary>Records access to clinical data. Implementations must never throw into the request path.</summary>
+public interface IAuditService
+{
+    /// <param name="action">One of <see cref="AuditActions"/>.</param>
+    /// <param name="subjectUserId">The patient whose records were involved.</param>
+    /// <param name="resourceId">The specific document, where the action names one.</param>
+    /// <param name="detail">Optional context, e.g. the query behind a patient search.</param>
+    Task RecordAsync(
+        string action,
+        string? subjectUserId = null,
+        string? resourceId = null,
+        string? detail = null,
+        CancellationToken ct = default);
+}
+
 public interface IFileStorageService
 {
     Task<(string StoredPath, long Length)> SaveAsync(IFormFile file, string userId, CancellationToken ct = default);

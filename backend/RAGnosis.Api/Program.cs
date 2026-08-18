@@ -1,13 +1,19 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using RAGnosis.Api.Configuration;
 using RAGnosis.Api.Data;
 using RAGnosis.Api.Dtos;
+using RAGnosis.Api.Middleware;
 using RAGnosis.Api.Services;
 using RAGnosis.Api.Services.Abstractions;
 
@@ -26,6 +32,13 @@ builder.Services.Configure<EmbeddingSettings>(builder.Configuration.GetSection(E
 builder.Services.Configure<OcrSettings>(builder.Configuration.GetSection(OcrSettings.SectionName));
 
 var jwtSettings = builder.Configuration.GetSection(JwtSettings.SectionName).Get<JwtSettings>() ?? new JwtSettings();
+
+// Refuse to start on a configuration that would be unsafe once deployed, rather than
+// coming up quietly with a signing key that is published in this repository.
+StartupValidation.Validate(
+    builder.Configuration,
+    builder.Environment,
+    LoggerFactory.Create(b => b.AddConsole()).CreateLogger("Startup"));
 
 // ---------------------------------------------------------------- json contract
 builder.Services
@@ -68,6 +81,7 @@ builder.Services.AddSingleton<KnowledgeSeeder>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<ITokenService, TokenService>();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
+builder.Services.AddScoped<IAuditService, AuditService>();
 
 builder.Services.AddSingleton<FileStorageService>();
 builder.Services.AddSingleton<IFileStorageService>(sp => sp.GetRequiredService<FileStorageService>());
@@ -110,6 +124,46 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+
+// ---------------------------------------------------------------- rate limiting
+// Credential endpoints are the cheapest thing to attack: BCrypt at work factor 12 makes
+// each guess expensive for us, not for the attacker, so the cap is on attempts per IP.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy(RateLimitPolicies.Auth, context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        }));
+
+    // Answer refusals in the same envelope as everything else, so the client's single
+    // error path renders a real message instead of an empty 429 body.
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+
+        var json = context.HttpContext.RequestServices
+            .GetRequiredService<IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>>()
+            .Value.JsonSerializerOptions;
+
+        await JsonSerializer.SerializeAsync(
+            context.HttpContext.Response.Body,
+            new ApiError("rate_limited", "Too many attempts. Please wait a minute and try again."),
+            json, ct);
+    };
+});
+
+// ---------------------------------------------------------------- diagnostics
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+builder.Services
+    .AddHealthChecks()
+    .AddCheck<MongoHealthCheck>("mongodb", tags: ["ready"]);
 
 // ---------------------------------------------------------------- cors
 const string CorsPolicy = "ragnosis-spa";
@@ -161,12 +215,20 @@ else
     app.UseHsts();
 }
 
+// Correlation runs first so everything downstream — including the exception handler —
+// can attach the same id to whatever it logs.
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<RequestLoggingMiddleware>();
+app.UseExceptionHandler(_ => { });
+
 app.UseCors(CorsPolicy);
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Kept at the API root so the Vite dev server and the browser can both reach it.
+// Kept at the API root, and in its original shape, so the Vite dev server and the browser
+// can both reach it and the existing client keeps reading the same fields.
 app.MapGet("/health", (IEmbeddingService embeddings, ILlmService llm) => Results.Ok(new
 {
     status = "ok",
@@ -174,6 +236,16 @@ app.MapGet("/health", (IEmbeddingService embeddings, ILlmService llm) => Results
     embeddings_available = embeddings.IsAvailable,
     llm_configured = llm.IsConfigured
 })).AllowAnonymous();
+
+// Liveness answers "is the process up" — it must not touch dependencies, or a database
+// blip would have the orchestrator restart a perfectly healthy API.
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
+
+// Readiness answers "can it serve traffic", so it does check MongoDB.
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+}).AllowAnonymous();
 
 // ---------------------------------------------------------------- startup work
 using (var scope = app.Services.CreateScope())

@@ -138,6 +138,7 @@ public sealed class BookAppointmentResponse
 public sealed class AppointmentListResponse
 {
     public List<AppointmentResponse> Appointments { get; set; } = [];
+    public PageInfo? Pagination { get; set; }
 }
 
 public sealed class AppointmentResponse
@@ -205,6 +206,7 @@ public sealed class PrescriptionMedicineRequest
 public sealed class PrescriptionListResponse
 {
     public List<PrescriptionResponse> Prescriptions { get; set; } = [];
+    public PageInfo? Pagination { get; set; }
 }
 
 public sealed class PrescriptionResponse

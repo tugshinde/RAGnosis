@@ -1,8 +1,10 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using RAGnosis.Api.Configuration;
 using RAGnosis.Api.Data;
 using RAGnosis.Api.Dtos;
 using RAGnosis.Api.Helpers;
@@ -23,12 +25,15 @@ public sealed class HospitalController(
     ITokenService tokenService,
     ReportsController reports,
     ICurrentUser currentUser,
+    IAuditService audit,
+    IWebHostEnvironment environment,
     ILogger<HospitalController> logger) : ApiControllerBase(currentUser)
 {
     // ── Doctor authentication ────────────────────────────────────────────────
 
     [HttpPost("doctor/register")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicies.Auth)]
     public async Task<ActionResult<DoctorAuthResponse>> DoctorRegister(
         [FromBody] DoctorRegisterRequest request, CancellationToken ct)
     {
@@ -60,6 +65,7 @@ public sealed class HospitalController(
 
     [HttpPost("doctor/login")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicies.Auth)]
     public async Task<ActionResult<DoctorAuthResponse>> DoctorLogin(
         [FromBody] StaffLoginRequest request, CancellationToken ct)
     {
@@ -94,6 +100,7 @@ public sealed class HospitalController(
 
     [HttpPost("receptionist/register")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicies.Auth)]
     public async Task<ActionResult<ReceptionistAuthResponse>> ReceptionistRegister(
         [FromBody] ReceptionistRegisterRequest request, CancellationToken ct)
     {
@@ -133,6 +140,7 @@ public sealed class HospitalController(
 
     [HttpPost("receptionist/login")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicies.Auth)]
     public async Task<ActionResult<ReceptionistAuthResponse>> ReceptionistLogin(
         [FromBody] StaffLoginRequest request, CancellationToken ct)
     {
@@ -187,6 +195,10 @@ public sealed class HospitalController(
                     | Builders<User>.Filter.Regex(u => u.Mobile, pattern));
 
         var patients = await context.Users.Find(filter).Limit(10).ToListAsync(ct);
+
+        // Searching the patient directory is itself a disclosure of who is a patient here,
+        // so the query is recorded alongside the reads it leads to.
+        await audit.RecordAsync(AuditActions.PatientSearch, detail: q.Trim(), ct: ct);
 
         return Ok(new PatientSearchResponse
         {
@@ -319,7 +331,8 @@ public sealed class HospitalController(
     /// <summary>Every appointment booked at this desk.</summary>
     [HttpGet("receptionist/my-patients")]
     [Authorize]
-    public async Task<ActionResult<AppointmentListResponse>> MyPatients(CancellationToken ct)
+    public async Task<ActionResult<AppointmentListResponse>> MyPatients(
+        [FromQuery(Name = "")] PageRequest paging, CancellationToken ct)
     {
         if (!TryGetStaffId(Roles.Receptionist, out var id, out var error)) return error!;
 
@@ -329,13 +342,21 @@ public sealed class HospitalController(
         if (BsonJson.IsValidObjectId(user?.DoctorId))
             filter |= Builders<Appointment>.Filter.Eq(a => a.DoctorId, user!.DoctorId);
 
-        var appointments = await context.Appointments
-            .Find(filter)
+        var query = context.Appointments.Find(filter);
+
+        var total = await query.CountDocumentsAsync(ct);
+
+        var appointments = await query
             .SortByDescending(a => a.ScheduledFor)
-            .Limit(200)
+            .Skip(paging.Skip)
+            .Limit(paging.Size)
             .ToListAsync(ct);
 
-        return Ok(new AppointmentListResponse { Appointments = appointments.Select(MapAppointment).ToList() });
+        return Ok(new AppointmentListResponse
+        {
+            Appointments = appointments.Select(MapAppointment).ToList(),
+            Pagination = PageInfo.From(paging, total)
+        });
     }
 
     // ── Reports uploaded on a patient's behalf ───────────────────────────────
@@ -359,6 +380,8 @@ public sealed class HospitalController(
 
         // Reuse the patient pipeline so the report lands in their dashboard unchanged.
         var report = await reports.CreateAndAnalyzeAsync(request.File, patient.Id!, null, ct);
+
+        await audit.RecordAsync(AuditActions.ReportUploadOnBehalf, patient.Id, report.Id, ct: ct);
 
         if (report.Status == ReportStatus.Failed)
             return BadRequest(new ApiError("unreadable", report.ErrorMessage ?? "The report could not be read."));
@@ -404,6 +427,8 @@ public sealed class HospitalController(
 
         await context.Prescriptions.InsertOneAsync(prescription, cancellationToken: ct);
 
+        await audit.RecordAsync(AuditActions.PrescriptionIssue, patient.Id, prescription.Id, ct: ct);
+
         if (request.CreateReminders)
             await CreateRemindersForAsync(prescription, ct);
 
@@ -417,21 +442,32 @@ public sealed class HospitalController(
     /// <summary>The signed-in patient's own prescriptions.</summary>
     [HttpGet("prescriptions/me")]
     [Authorize]
-    public async Task<ActionResult<PrescriptionListResponse>> MyPrescriptions(CancellationToken ct)
+    public async Task<ActionResult<PrescriptionListResponse>> MyPrescriptions(
+        [FromQuery(Name = "")] PageRequest paging, CancellationToken ct)
     {
         if (!TryGetUserId(out var userId, out var error)) return error!;
 
-        var prescriptions = await context.Prescriptions
-            .Find(p => p.PatientId == userId)
+        var query = context.Prescriptions.Find(p => p.PatientId == userId);
+
+        var total = await query.CountDocumentsAsync(ct);
+
+        var prescriptions = await query
             .SortByDescending(p => p.IssuedAt)
+            .Skip(paging.Skip)
+            .Limit(paging.Size)
             .ToListAsync(ct);
 
-        return Ok(new PrescriptionListResponse { Prescriptions = prescriptions.Select(MapPrescription).ToList() });
+        return Ok(new PrescriptionListResponse
+        {
+            Prescriptions = prescriptions.Select(MapPrescription).ToList(),
+            Pagination = PageInfo.From(paging, total)
+        });
     }
 
     [HttpGet("prescriptions/patient/{patientId}")]
     [Authorize]
-    public async Task<ActionResult<PrescriptionListResponse>> PatientPrescriptions(string patientId, CancellationToken ct)
+    public async Task<ActionResult<PrescriptionListResponse>> PatientPrescriptions(
+        string patientId, [FromQuery(Name = "")] PageRequest paging, CancellationToken ct)
     {
         if (!TryGetStaffId(Roles.Doctor, out var doctorId, out var error)) return error!;
 
@@ -439,21 +475,42 @@ public sealed class HospitalController(
             return BadRequestError("The patient id is not valid.");
 
         // A doctor sees the prescriptions they issued, not another clinician's.
-        var prescriptions = await context.Prescriptions
-            .Find(p => p.PatientId == patientId && p.DoctorId == doctorId)
+        var query = context.Prescriptions.Find(p => p.PatientId == patientId && p.DoctorId == doctorId);
+
+        var total = await query.CountDocumentsAsync(ct);
+
+        var prescriptions = await query
             .SortByDescending(p => p.IssuedAt)
+            .Skip(paging.Skip)
+            .Limit(paging.Size)
             .ToListAsync(ct);
 
-        return Ok(new PrescriptionListResponse { Prescriptions = prescriptions.Select(MapPrescription).ToList() });
+        await audit.RecordAsync(AuditActions.PrescriptionRead, patientId, ct: ct);
+
+        return Ok(new PrescriptionListResponse
+        {
+            Prescriptions = prescriptions.Select(MapPrescription).ToList(),
+            Pagination = PageInfo.From(paging, total)
+        });
     }
 
     // ── Demo data ────────────────────────────────────────────────────────────
 
-    /// <summary>Creates a demo doctor and receptionist so the portals can be explored immediately.</summary>
+    /// <summary>
+    /// Creates a demo doctor and receptionist so the portals can be explored immediately.
+    /// Development only: the accounts use a published password, so exposing this in any
+    /// deployed environment would hand anonymous callers staff access to clinical records.
+    /// </summary>
     [HttpPost("demo/seed")]
     [AllowAnonymous]
     public async Task<ActionResult<object>> SeedDemo(CancellationToken ct)
     {
+        if (!environment.IsDevelopment())
+        {
+            logger.LogWarning("Demo seed endpoint was called in {Environment} and refused.", environment.EnvironmentName);
+            return NotFound(new ApiError("not_found", "No such endpoint."));
+        }
+
         const string doctorEmail = "doctor@ragnosis.dev";
         const string receptionEmail = "reception@ragnosis.dev";
         const string password = "demo1234";

@@ -8,6 +8,7 @@ namespace RAGnosis.Api.Dtos;
 public sealed class ReportListResponse
 {
     public List<ReportResponse> Reports { get; set; } = [];
+    public PageInfo? Pagination { get; set; }
 }
 
 public sealed class ReportResponse

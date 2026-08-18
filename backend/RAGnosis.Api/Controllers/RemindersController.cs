@@ -18,6 +18,7 @@ public sealed class RemindersController(
 {
     [HttpGet("")]
     public async Task<ActionResult<ReminderListResponse>> List(
+        [FromQuery(Name = "")] PageRequest paging,
         [FromQuery(Name = "active_only")] bool activeOnly = false,
         CancellationToken ct = default)
     {
@@ -27,12 +28,21 @@ public sealed class RemindersController(
         if (activeOnly)
             filter &= Builders<Reminder>.Filter.Eq(r => r.IsActive, true);
 
-        var reminders = await context.Reminders
-            .Find(filter)
+        var query = context.Reminders.Find(filter);
+
+        var total = await query.CountDocumentsAsync(ct);
+
+        var reminders = await query
             .SortByDescending(r => r.CreatedAt)
+            .Skip(paging.Skip)
+            .Limit(paging.Size)
             .ToListAsync(ct);
 
-        return Ok(new ReminderListResponse { Reminders = reminders.Select(Map).ToList() });
+        return Ok(new ReminderListResponse
+        {
+            Reminders = reminders.Select(Map).ToList(),
+            Pagination = PageInfo.From(paging, total)
+        });
     }
 
     /// <summary>Doses due today, expanded per scheduled time and sorted chronologically.</summary>

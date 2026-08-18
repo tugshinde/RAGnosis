@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import axios from 'axios'
 import App from './App.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 import './index.css'
 
 // Backend API base. Override with VITE_API_URL when the API isn't on the default port.
@@ -12,7 +13,9 @@ axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
         <BrowserRouter>
-            <App />
+            <ErrorBoundary>
+                <App />
+            </ErrorBoundary>
             <Toaster
                 position="top-right"
                 toastOptions={{

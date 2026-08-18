@@ -372,6 +372,28 @@ is available at `/swagger` in Development.
 | Method | Route |
 |---|---|
 | GET | `/health` — `status`, `utc`, `embeddings_available`, `llm_configured` |
+| GET | `/health/live` — liveness; touches no dependency |
+| GET | `/health/ready` — readiness; fails when MongoDB is unreachable |
+
+### Pagination
+
+The reports, reminders, prescriptions, and appointment list endpoints accept `page`
+(1-based) and `page_size` query parameters and return a `pagination` object alongside the
+existing list key. Omitting both returns the first 50 items; `page_size` is clamped to 200.
+Out-of-range values are corrected rather than rejected.
+
+```json
+{
+  "reports": [ /* ... */ ],
+  "pagination": { "page": 1, "page_size": 50, "total_items": 2, "total_pages": 1, "has_next": false }
+}
+```
+
+### Request correlation
+
+Every response carries an `X-Correlation-ID` header, echoing the inbound value when one is
+supplied and safe (alphanumerics, `-`, `_`, `.`, up to 64 characters) and generating one
+otherwise. The id is attached to every log line produced while handling that request.
 
 ---
 
@@ -388,6 +410,7 @@ MongoDB, 7 collections (`backend/RAGnosis.Api/Data/MongoContext.cs`):
 | `prescriptions` | `Prescription` | `PatientId`, `DoctorId`, `Items[]` (medicine, dosage, frequency, duration, instructions), `Notes`, `IssuedAt` |
 | `chat_messages` | `ChatMessage` | `UserId`, `ReportId?`, `Role` (user/assistant/system), `Content`, `Citations[]` |
 | `knowledge_chunks` | `KnowledgeChunk` | `Title`, `Content`, `Source`, `Embedding[]` (384-dim, cached) |
+| `audit_events` | `AuditEvent` | `Action`, `ActorId`, `ActorRole`, `SubjectUserId`, `ResourceId`, `SelfAccess`, `CorrelationId`, `IpAddress`, `OccurredAt` |
 
 ---
 
@@ -468,6 +491,24 @@ their patients' reports and issue prescriptions; receptionists book appointments
 upload reports on a patient's behalf but cannot read clinical records. File paths are
 resolved against the upload root and rejected if they escape it.
 
+**Fail-fast configuration.** The API refuses to start outside Development if `Jwt:Key` is
+missing, shorter than 32 characters, or set to the signing key committed to this
+repository — a published key would let anyone forge a token for any role.
+
+**Development-only endpoints.** `POST /api/hospital/demo/seed` creates staff accounts with
+a published password, so it returns `404` in any environment other than Development.
+Swagger is likewise Development-only.
+
+**Rate limiting.** Registration and sign-in (patient, doctor, and receptionist) are capped
+at 10 attempts per minute per client IP, answered with a `429` in the standard envelope.
+
+**Audit trail.** Access to clinical data is recorded to the `audit_events` collection:
+report reads, downloads, deletes and uploads, prescription reads and issues, patient
+directory searches, and report-scoped chat. Each entry carries the actor and role, the
+subject patient, the resource, the correlation id, the caller's IP, and a `self_access`
+flag — the entries where that flag is false are staff reading someone else's records.
+Routine list calls are deliberately not recorded; the dashboard polls them on every render.
+
 **CORS.** Restricted to configured origins (`http://localhost:5173` by default).
 
 ---
@@ -512,12 +553,20 @@ Without it, image uploads return a clear error; PDF uploads are unaffected.
 ## 🧪 Tests
 
 ```bash
-cd backend && dotnet test        # 70 tests
+cd backend && dotnet test        # 81 tests
 ```
 
 Covers parameter extraction and flagging, reference-range matching, PDF line
 reconstruction, JWT signing and claim handling, BCrypt verification, the WordPiece
-tokenizer, cosine similarity, and recommendation generation.
+tokenizer, cosine similarity, recommendation generation, and pagination clamping.
+
+### Known advisories
+
+`npm audit` reports two moderate advisories against `react-router` 6.x. Neither is
+reachable here: one requires server-side rendering, which this SPA does not use, and the
+other requires an attacker-controlled navigation target, while every `navigate()` and
+`<Link to>` in the app resolves to a hardcoded path. Clearing them needs a React Router
+major upgrade, which is a routing-level change not worth making for no change in exposure.
 
 ---
 

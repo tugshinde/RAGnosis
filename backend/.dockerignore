@@ -1,0 +1,23 @@
+# Build outputs — rebuilt inside the image, and copying them in invalidates the layer cache
+# on every local build while risking host-built binaries leaking into the container.
+**/bin/
+**/obj/
+
+# Local runtime state
+**/uploads/
+**/*.user
+**/.vs/
+**/.vscode/
+
+# Never ship secrets into an image layer
+**/appsettings.*.local.json
+**/.env
+**/*.pfx
+
+# Optional model and OCR assets are mounted or downloaded, not baked in
+**/Models/onnx/*.onnx
+**/Models/onnx/vocab.txt
+**/tessdata/*.traineddata
+
+# Tests are not needed in the runtime image
+RAGnosis.Tests/
