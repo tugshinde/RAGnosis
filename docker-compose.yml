@@ -1,0 +1,52 @@
+# One-command startup: MongoDB + API + frontend.
+#   docker compose up --build
+# Then open http://localhost:5173
+services:
+  mongo:
+    image: mongo:8
+    container_name: ragnosis-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: RAGnosis.Api/Dockerfile
+    container_name: ragnosis-api
+    depends_on:
+      - mongo
+    ports:
+      - "5000:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Development
+      Mongo__ConnectionString: mongodb://mongo:27017
+      Mongo__Database: ragnosis
+      Jwt__Key: ${JWT_KEY:-ragnosis-local-development-signing-key-change-in-production}
+      Groq__ApiKey: ${GROQ_API_KEY:-}
+      Cors__AllowedOrigins__0: http://localhost:5173
+      Cors__AllowedOrigins__1: http://127.0.0.1:5173
+    volumes:
+      - api-uploads:/app/uploads
+
+  web:
+    image: node:20-alpine
+    container_name: ragnosis-web
+    depends_on:
+      - api
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:5000
+    volumes:
+      - ./frontend:/app
+      - web-modules:/app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
+volumes:
+  mongo-data:
+  api-uploads:
+  web-modules:

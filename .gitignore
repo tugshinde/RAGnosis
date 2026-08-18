@@ -1,0 +1,27 @@
+# .NET
+backend/**/bin/
+backend/**/obj/
+*.user
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Local config and secrets
+.env
+appsettings.Local.json
+appsettings.Production.json
+
+# Runtime data — never commit patient uploads
+backend/RAGnosis.Api/uploads/
+
+# Downloaded assets, not committed
+backend/RAGnosis.Api/Models/onnx/*.onnx
+backend/RAGnosis.Api/Models/onnx/vocab.txt
+backend/RAGnosis.Api/tessdata/*.traineddata
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
