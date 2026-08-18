@@ -21,7 +21,14 @@ public sealed class GroqSettings
     public const string SectionName = "Groq";
     public string ApiKey { get; set; } = string.Empty;
     public string BaseUrl { get; set; } = "https://api.groq.com/openai/v1";
-    public string Model { get; set; } = "llama-3.3-70b-versatile";
+    /// <summary>
+    /// Groq retires models fairly often; a stale id returns 404 with "model_not_found" rather
+    /// than anything resembling a config error. Check /v1/models against your key if chat
+    /// starts failing. Avoid the groq/compound* entries here: they are agentic systems that
+    /// can fetch outside information, which would break this app's promise to answer only
+    /// from the retrieved context.
+    /// </summary>
+    public string Model { get; set; } = "openai/gpt-oss-120b";
     public int MaxTokens { get; set; } = 1024;
 }
 

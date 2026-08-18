@@ -23,6 +23,12 @@ JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Local, uncommitted overrides. Added last so it wins over every other source, which is the
+// point: it is the one place a developer can drop a secret without touching a tracked file
+// and without depending on user-secrets or the machine's environment resolving correctly.
+// Listed in .gitignore — never commit it.
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
 // ---------------------------------------------------------------- configuration
 builder.Services.Configure<MongoSettings>(builder.Configuration.GetSection(MongoSettings.SectionName));
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSettings.SectionName));

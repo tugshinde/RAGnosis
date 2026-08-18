@@ -36,11 +36,11 @@ const PIPELINE_STEPS = [
         detail: 'A custom WordPiece tokenizer feeds a 384-dim MiniLM model; attention-masked mean pooling plus L2 normalization produce the query vector. It\'s compared against 27 cached knowledge-chunk embeddings (25 reference parameters + 2 guidance chunks) — the top 4 above a similarity floor are retrieved. Without a supplied ONNX model, retrieval falls back to keyword (term-overlap) search so answers stay grounded either way.'
     },
     {
-        id: 4, icon: '🤖', title: 'Groq LLM Chat', model: 'llama-3.3-70b-versatile',
+        id: 4, icon: '🤖', title: 'Groq LLM Chat', model: 'openai/gpt-oss-120b',
         subtitle: 'Groq Inference API · constrained system prompt',
         color: '#10b981',
-        desc: 'Patient questions are answered by Llama 3.3 70B, enriched with retrieved context and the patient\'s own measured values, running at low latency on Groq\'s LPU hardware.',
-        tech: ['Groq API', 'Llama 3.3 70B', 'Constrained Prompt'],
+        desc: 'Patient questions are answered by GPT-OSS 120B, enriched with retrieved context and the patient\'s own measured values, running at low latency on Groq\'s LPU hardware.',
+        tech: ['Groq API', 'GPT-OSS 120B', 'Constrained Prompt'],
         detail: 'The system prompt restricts the model to the supplied context and report values, forbids diagnosis, medication names, or dosing, and closes by pointing the patient to a clinician. Without a configured Groq API key, the chat endpoint returns a clear 503 instead of a broken response.'
     },
     {
@@ -271,7 +271,7 @@ export default function SystemAnimation() {
                         {[
                             { icon: '⚛️', title: 'Frontend', items: ['React 18 + Vite', 'Framer Motion', 'Recharts', 'React Router v6'] },
                             { icon: '🟣', title: 'Backend', items: ['ASP.NET Core 8 (C#)', 'MongoDB.Driver', 'JWT Auth (HS256)', 'BCrypt.Net'] },
-                            { icon: '🧠', title: 'AI Models', items: ['ONNX Runtime', 'MiniLM-L6-v2 (embeddings)', 'WordPiece Tokenizer', 'Llama 3.3 70B (Groq)'] },
+                            { icon: '🧠', title: 'AI Models', items: ['ONNX Runtime', 'MiniLM-L6-v2 (embeddings)', 'WordPiece Tokenizer', 'GPT-OSS 120B (Groq)'] },
                             { icon: '🔍', title: 'RAG Engine', items: ['Cosine Similarity', '27 Knowledge Chunks', 'MongoDB Vector Cache', 'Keyword Fallback'] },
                             { icon: '🗄️', title: 'Database', items: ['MongoDB', '7 Collections', 'User Profiles', 'Report Storage'] },
                             { icon: '⚡', title: 'Infrastructure', items: ['Groq API', 'PdfPig', 'Tesseract + OpenCvSharp', 'Docker Compose'] },

@@ -17,7 +17,15 @@ public sealed class GroqLlmService(
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(_settings.ApiKey);
+    /// <summary>
+    /// Keys routinely arrive with stray whitespace — a trailing space inside the quotes of a
+    /// shell command, or a newline from a copy-paste. Untrimmed, that produces a malformed
+    /// Bearer header and a 401 that reads exactly like an invalid key, so it is stripped once
+    /// here rather than debugged repeatedly.
+    /// </summary>
+    private string ApiKey => _settings.ApiKey?.Trim() ?? string.Empty;
+
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(ApiKey);
 
     public async Task<string> CompleteAsync(
         string systemPrompt,
@@ -41,7 +49,7 @@ public sealed class GroqLlmService(
         {
             Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json")
         };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _settings.ApiKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey);
 
         using var response = await httpClient.SendAsync(request, ct);
         var body = await response.Content.ReadAsStringAsync(ct);

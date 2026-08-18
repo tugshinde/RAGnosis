@@ -8,7 +8,7 @@
 [![React](https://img.shields.io/badge/Frontend-React_18%2BVite-61dafb?logo=react)](https://vitejs.dev)
 [![MongoDB](https://img.shields.io/badge/Database-MongoDB-47A248?logo=mongodb)](https://www.mongodb.com)
 [![ONNX](https://img.shields.io/badge/Embeddings-ONNX_Runtime-005CED?logo=onnx)](https://onnxruntime.ai)
-[![Groq](https://img.shields.io/badge/LLM-Groq_Llama_3.3-f97316?logo=meta)](https://groq.com)
+[![Groq](https://img.shields.io/badge/LLM-Groq_GPT--OSS_120B-f97316)](https://groq.com)
 
 ---
 
@@ -51,7 +51,7 @@ sees both alongside their own reports in one dashboard.
 |---------|---------|
 | 📐 **Reference-range analysis** | 25-parameter clinical catalogue with aliases, regex-based extraction from PDFs and images |
 | 🚦 **Automatic flagging** | Every value classified low / normal / high; ranges printed on the report take precedence over catalogue defaults |
-| 🤖 **RAG-powered chatbot** | ONNX-embedded query, cosine-similarity retrieval over cached knowledge chunks, answered by Groq's Llama 3.3 70B under a constrained, non-diagnostic system prompt |
+| 🤖 **RAG-powered chatbot** | ONNX-embedded query, cosine-similarity retrieval over cached knowledge chunks, answered by Groq's GPT-OSS 120B under a constrained, non-diagnostic system prompt |
 | 📊 **Health metrics dashboard** | Detected values projected onto a flat metrics map, charted with Recharts |
 | 🏥 **Hospital portal** | Doctor and receptionist roles for appointments, prescriptions, and uploading reports on a patient's behalf |
 | 💊 **Medicine reminders** | Daily reminder times per medicine, auto-created from prescriptions |
@@ -139,7 +139,7 @@ Nothing is required to run locally — sensible development defaults are committ
 | JWT signing key | `Jwt__Key` | dev key in `appsettings.Development.json` |
 | JWT expiry | `Jwt__ExpiryHours` | `24` |
 | Groq API key | `Groq__ApiKey` | empty — chatbot returns 503 |
-| Groq model | `Groq__Model` | `llama-3.3-70b-versatile` |
+| Groq model | `Groq__Model` | `openai/gpt-oss-120b` |
 | Max upload size | `Storage__MaxFileSizeBytes` | `26214400` (25 MB) |
 | Allowed origins | `Cors__AllowedOrigins__0` | `http://localhost:5173` |
 | Frontend API URL | `VITE_API_URL` | `http://localhost:5000` |
@@ -180,7 +180,7 @@ Get a free Groq API key at [console.groq.com](https://console.groq.com).
                 ▼                                ▼
         ┌───────────────┐               ┌────────────────┐
         │    MongoDB     │               │    Groq API     │
-        │  7 collections │               │ Llama 3.3 70B   │
+        │  7 collections │               │ GPT-OSS 120B   │
         └───────────────┘               └────────────────┘
 ```
 
@@ -240,7 +240,7 @@ Creatinine, Blood Urea Nitrogen, TSH, Vitamin D, Vitamin B12, Serum Iron, Ferrit
             stay grounded either way.
 
 4. ANSWER   Retrieved passages plus the patient's own measured values are passed
-            to Groq's llama-3.3-70b-versatile (temperature 0.2, max 1024 tokens)
+            to Groq's openai/gpt-oss-120b (temperature 0.2, max 1024 tokens)
             under a system prompt that forbids diagnosis, medication names, and
             dosing, and closes by recommending a clinician.
 ```
@@ -287,7 +287,7 @@ and retrieval uses keyword matching only — the chatbot still works.
 | **OCR** | Tesseract 5.2.0 + OpenCvSharp4 4.13 preprocessing (denoise, adaptive threshold, deskew) |
 | **Embeddings** | Microsoft.ML.OnnxRuntime 1.29, `all-MiniLM-L6-v2` (384-dim), custom WordPiece tokenizer |
 | **RAG retrieval** | Cosine similarity over cached MongoDB-stored vectors, keyword-overlap fallback |
-| **LLM chat** | Groq API → `llama-3.3-70b-versatile`, OpenAI-compatible chat completions |
+| **LLM chat** | Groq API → `openai/gpt-oss-120b`, OpenAI-compatible chat completions |
 | **Database** | MongoDB, 7 collections |
 | **API docs** | Swashbuckle / Swagger UI at `/swagger` (Development only) |
 | **Containers** | Docker Compose — MongoDB + API + Vite dev server |
@@ -495,6 +495,19 @@ resolved against the upload root and rejected if they escape it.
 missing, shorter than 32 characters, or set to the signing key committed to this
 repository — a published key would let anyone forge a token for any role.
 
+**Signing key precedence.** `appsettings.json` leaves `Jwt:Key` empty on purpose so a
+deployment must supply its own; `appsettings.Development.json` carries a local fallback that
+is public by virtue of being committed. For local work prefer .NET user-secrets, which
+override both and live outside the repository:
+
+```bash
+dotnet user-secrets set "Jwt:Key" "<a long random value>" --project backend/RAGnosis.Api
+```
+
+Changing the key invalidates every token already issued, so existing sessions must sign in
+again. The `UserSecretsId` must be compiled in, so rebuild rather than `--no-build` the
+first time.
+
 **Development-only endpoints.** `POST /api/hospital/demo/seed` creates staff accounts with
 a published password, so it returns `404` in any environment other than Development.
 Swagger is likewise Development-only.
@@ -614,16 +627,23 @@ regroups words by baseline and pads column gaps instead; a regression test cover
 
 ## 📌 Status
 
-Implemented and tested: authentication, report upload and analysis, PDF extraction,
-parameter detection and flagging, recommendations, reminders, appointments, prescriptions
-with automatic reminder creation, and chat orchestration with persistence.
+Implemented and exercised end to end: authentication, report upload and analysis, PDF
+extraction, parameter detection and flagging, recommendations, reminders, appointments,
+prescriptions with automatic reminder creation, and chat orchestration with persistence.
 
-Written but not yet exercised against real inputs: Tesseract OCR (needs language data) and
-OpenCvSharp preprocessing (needs native binaries).
+**Tesseract OCR and OpenCvSharp preprocessing now run against real input.** A scanned PNG
+lab report is preprocessed, OCR'd at ~80–86% mean character confidence, and parsed into the
+same flagged parameters a PDF produces. The OpenCvSharp native runtime is selected per
+platform in the csproj — without it, every OpenCV call throws and preprocessing silently
+degrades to the raw scan, which is easy to miss because OCR still broadly works.
 
-The ONNX embedding layer is implemented — tokenizer, inference, pooling and cosine search
-are all in place and unit-tested — but ships without model weights, so semantic retrieval
-is inactive until a model is supplied.
+**Semantic retrieval is active once model weights are supplied.** With
+`all-MiniLM-L6-v2.onnx` and `vocab.txt` present, the service loads at startup and backfills
+embeddings onto all 27 knowledge chunks automatically; `/health` then reports
+`embeddings_available: true`. Neither file is committed — see Optional components.
+
+**The chatbot still needs a Groq API key.** Without one, `/api/chat` returns a clear 503 and
+the rest of the application is unaffected.
 
 ---
 
