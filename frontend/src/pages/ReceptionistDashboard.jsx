@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useAuth } from '../context/AuthContext'
 
-function recAxios() {
-    const token = localStorage.getItem('receptionist_token')
-    return axios.create({ headers: { Authorization: `Bearer ${token}` } })
-}
+// The signed-in session sets the Authorization header on the shared axios default, so this
+// no longer builds its own instance from a portal-specific token.
+const recAxios = () => axios
 
 // ─── Patient Search Box ───────────────────────────────────────────────────────
 function PatientSearch({ onSelect, label = 'Search Patient' }) {
@@ -67,8 +67,7 @@ function PatientSearch({ onSelect, label = 'Search Patient' }) {
                             <div key={p._id}
                                 onClick={() => pick(p)}
                                 style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.04)', transition: 'background 0.15s' }}
-                                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
-                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                className="menu-item">
                                 <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>{p.name}</div>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                                     📧 {p.email} {p.mobile ? `· 📱 ${p.mobile}` : ''}{p.age ? ` · ${p.age}y` : ''}
@@ -318,26 +317,22 @@ const REC_NAV = [
 
 export default function ReceptionistDashboard() {
     const navigate = useNavigate()
+    const { user, logout: endSession } = useAuth()
     const [activeTab, setActiveTab] = useState('book')
-    const [info, setInfo] = useState(null)
+    const [info, setInfo] = useState(user)
 
     useEffect(() => {
-        const token = localStorage.getItem('receptionist_token')
-        const stored = localStorage.getItem('receptionist_info')
-        if (!token || !stored) { navigate('/receptionist/login'); return }
-        const recInfo = JSON.parse(stored)
-        setInfo(recInfo)
-        // Verify token + fetch fresh info (to get doctor_name)
-        axios.get('/api/hospital/receptionist/me', { headers: { Authorization: `Bearer ${token}` } })
-            .then(res => { setInfo(res.data.receptionist); localStorage.setItem('receptionist_info', JSON.stringify(res.data.receptionist)) })
-            .catch(() => { localStorage.removeItem('receptionist_token'); navigate('/receptionist/login') })
-    }, [navigate])
+        // The route guard has already established that a receptionist is signed in. This
+        // refetches so the linked doctor's name is present, which the sign-in payload omits.
+        axios.get('/api/hospital/receptionist/me')
+            .then(res => setInfo(res.data.receptionist ?? res.data))
+            .catch(() => { /* a rejected token is handled by the interceptor and the guard */ })
+    }, [])
 
     const logout = () => {
-        localStorage.removeItem('receptionist_token')
-        localStorage.removeItem('receptionist_info')
+        endSession()
         toast.success('Logged out')
-        navigate('/receptionist/login')
+        navigate('/login', { replace: true })
     }
 
     if (!info) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}><div className="spinner" /></div>

@@ -1,32 +1,48 @@
-import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import toast from 'react-hot-toast'
-import { useAuth } from '../context/AuthContext'
 import { motion } from 'framer-motion'
+import { useAuth, homeFor } from '../context/AuthContext'
+import FormField from '../components/FormField'
+import { useForm } from '../lib/useForm'
+import { validateIdentifier, validatePasswordPresent } from '../lib/validation'
 
 export default function LoginPage() {
-    const [form, setForm] = useState({ identifier: '', password: '' })
-    const [loading, setLoading] = useState(false)
     const { login } = useAuth()
     const navigate = useNavigate()
 
-    const handleChange = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+    const form = useForm(
+        { identifier: '', password: '' },
+        {
+            identifier: validateIdentifier,
+            // Sign-in only checks a password was typed. Applying the signup strength rules
+            // here would lock out anyone whose account predates them.
+            password: validatePasswordPresent,
+        }
+    )
 
-    const handleSubmit = async (e) => {
-        e.preventDefault()
-        setLoading(true)
+    const submit = form.handleSubmit(async (values) => {
         try {
-            const res = await axios.post('/api/auth/login', { email: form.identifier, password: form.password })
+            // The API takes either an email address or a mobile number in its `email` field.
+            const res = await axios.post('/api/auth/login', {
+                email: values.identifier.trim(),
+                password: values.password,
+            })
             login(res.data.token, res.data.user)
             toast.success(res.data.message)
-            navigate('/dashboard')
+
+            // The credentials already establish the role, so the destination follows from the
+            // response rather than from the user having picked a portal beforehand.
+            navigate(homeFor(res.data.user?.role), { replace: true })
         } catch (err) {
-            toast.error(err.response?.data?.error || 'Login failed')
-        } finally {
-            setLoading(false)
+            const status = err.response?.status
+            toast.error(
+                status === 429
+                    ? 'Too many attempts. Please wait a minute and try again.'
+                    : err.response?.data?.message || err.response?.data?.error || 'Sign in failed.'
+            )
         }
-    }
+    })
 
     return (
         <div className="auth-page">
@@ -41,59 +57,52 @@ export default function LoginPage() {
             >
                 <div style={{ textAlign: 'center', marginBottom: 32 }}>
                     <div className="logo-icon" style={{ margin: '0 auto 16px', width: 48, height: 48, fontSize: '1.3rem' }}>R</div>
-                    <h1 className="auth-title">Welcome Back</h1>
-                    <p className="auth-subtitle">Sign in with your email or mobile number</p>
+                    <h1 className="auth-title">Welcome back</h1>
+                    <p className="auth-subtitle">
+                        Sign in with your email or mobile number — patients and hospital staff use the same form.
+                    </p>
                 </div>
 
-                <form onSubmit={handleSubmit} id="login-form" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <div className="form-group">
-                        <label htmlFor="identifier">Email or Mobile Number</label>
-                        <input
-                            id="identifier"
-                            name="identifier"
-                            type="text"
-                            placeholder="email@example.com or 9876543210"
-                            required
-                            className="input"
-                            value={form.identifier}
-                            onChange={handleChange}
-                        />
-                    </div>
-                    <div className="form-group">
-                        <label htmlFor="password">Password</label>
-                        <input
-                            id="password"
-                            name="password"
-                            type="password"
-                            placeholder="••••••••"
-                            required
-                            className="input"
-                            value={form.password}
-                            onChange={handleChange}
-                        />
-                    </div>
+                <form onSubmit={submit} id="login-form" noValidate
+                    style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <FormField
+                        label="Email or mobile number"
+                        required
+                        autoComplete="username"
+                        placeholder="name@example.com or 9876543210"
+                        {...form.fieldProps('identifier')}
+                    />
+                    <FormField
+                        label="Password"
+                        type="password"
+                        required
+                        autoComplete="current-password"
+                        placeholder="••••••••"
+                        {...form.fieldProps('password')}
+                    />
 
                     <button
                         type="submit"
                         className="btn-primary"
                         id="login-submit"
-                        disabled={loading}
+                        disabled={form.submitting}
                         style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: '1rem', marginTop: 8 }}
                     >
-                        {loading ? <><div className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} /> Signing in...</> : '🔐 Sign In'}
+                        {form.submitting
+                            ? <><span className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} /> Signing in…</>
+                            : 'Sign in'}
                     </button>
                 </form>
 
-                <div style={{ marginTop: 20, padding: 16, background: 'var(--accent-cyan-dim)', borderRadius: 12, border: '1px solid var(--border)' }}>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                        💡 You can sign in with either your <strong>email address</strong> or <strong>10-digit mobile number</strong>
-                    </p>
-                </div>
-
                 <div className="auth-divider">New to RAGnosis?</div>
                 <Link to="/register" className="btn-ghost" style={{ width: '100%', justifyContent: 'center', padding: '12px' }}>
-                    Create Account
+                    Create a patient account
                 </Link>
+                <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 14 }}>
+                    Hospital staff — <Link to="/register/staff" style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>
+                        register a doctor or receptionist account
+                    </Link>
+                </p>
             </motion.div>
         </div>
     )

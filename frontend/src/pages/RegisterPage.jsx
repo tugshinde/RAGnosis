@@ -1,49 +1,62 @@
-import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import toast from 'react-hot-toast'
-import { useAuth } from '../context/AuthContext'
 import { motion } from 'framer-motion'
+import { useAuth } from '../context/AuthContext'
+import FormField from '../components/FormField'
+import { useForm } from '../lib/useForm'
+import {
+    BLOOD_GROUP_OPTIONS, GENDER_OPTIONS,
+    validateName, validateEmail, validateMobile, validatePassword, confirmPasswordMatches,
+    validateAge, validateHeight, validateWeight, validateBloodPressure, validateBloodGroup,
+} from '../lib/validation'
 
-const FIELDS = [
-    { name: 'name', label: 'Full Name', type: 'text', placeholder: 'Riya Sharma', required: true },
-    { name: 'email', label: 'Email Address', type: 'email', placeholder: 'riya@example.com', required: true },
-    { name: 'mobile', label: 'Mobile Number', type: 'tel', placeholder: '9876543210', required: true },
-    { name: 'password', label: 'Password', type: 'password', placeholder: '••••••••', required: true },
-    { name: 'age', label: 'Age (years)', type: 'number', placeholder: '25', required: true },
-    { name: 'height_inches', label: 'Height (inches)', type: 'number', placeholder: '65', required: true },
-    { name: 'weight_kg', label: 'Weight (kg)', type: 'number', placeholder: '60', required: false },
-    { name: 'blood_pressure', label: 'Blood Pressure (optional)', type: 'text', placeholder: '120/80', required: false },
-    { name: 'blood_group', label: 'Blood Group (optional)', type: 'text', placeholder: 'O+', required: false },
-]
+const INITIAL = {
+    name: '', email: '', mobile: '', password: '', confirm_password: '',
+    age: '', height_inches: '', weight_kg: '',
+    blood_pressure: '', blood_group: '', gender: 'Male',
+}
 
 export default function RegisterPage() {
-    const [form, setForm] = useState({ gender: 'Male' })
-    const [loading, setLoading] = useState(false)
     const { login } = useAuth()
     const navigate = useNavigate()
 
-    const handleChange = (e) => setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+    const form = useForm(INITIAL, {
+        name: validateName,
+        email: validateEmail,
+        mobile: validateMobile,
+        password: validatePassword,
+        // Cross-field: reads the live password from the second argument rather than closing
+        // over `form`, which is not assigned yet while useForm runs its first validation.
+        confirm_password: (value, values) => confirmPasswordMatches(values.password)(value),
+        age: validateAge,
+        height_inches: validateHeight,
+        weight_kg: validateWeight,
+        blood_pressure: validateBloodPressure,
+        blood_group: validateBloodGroup,
+    })
 
-    const handleSubmit = async (e) => {
-        e.preventDefault()
-        setLoading(true)
+    const submit = form.handleSubmit(async (values) => {
         try {
             const res = await axios.post('/api/auth/register', {
-                ...form,
-                age: Number(form.age),
-                height_inches: Number(form.height_inches),
-                weight_kg: form.weight_kg ? Number(form.weight_kg) : undefined,
+                name: values.name.trim(),
+                email: values.email.trim().toLowerCase(),
+                mobile: values.mobile.trim(),
+                password: values.password,
+                gender: values.gender,
+                age: Number(values.age),
+                height_inches: Number(values.height_inches),
+                weight_kg: values.weight_kg ? Number(values.weight_kg) : undefined,
+                blood_pressure: values.blood_pressure.trim() || undefined,
+                blood_group: values.blood_group.trim().toUpperCase() || undefined,
             })
             login(res.data.token, res.data.user)
             toast.success(res.data.message)
             navigate('/dashboard')
         } catch (err) {
-            toast.error(err.response?.data?.error || 'Registration failed')
-        } finally {
-            setLoading(false)
+            toast.error(err.response?.data?.message || err.response?.data?.error || 'Registration failed.')
         }
-    }
+    })
 
     return (
         <div className="auth-page">
@@ -55,54 +68,102 @@ export default function RegisterPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
                 className="auth-card"
-                style={{ maxWidth: 560 }}
+                style={{ maxWidth: 620 }}
             >
                 <div style={{ textAlign: 'center', marginBottom: 32 }}>
                     <div className="logo-icon" style={{ margin: '0 auto 16px', width: 48, height: 48, fontSize: '1.3rem' }}>R</div>
-                    <h1 className="auth-title">Create Your Account</h1>
+                    <h1 className="auth-title">Create your account</h1>
                     <p className="auth-subtitle">Join RAGnosis and get AI-powered health insights</p>
                 </div>
 
-                <form onSubmit={handleSubmit} id="register-form">
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                        {FIELDS.map(f => (
-                            <div key={f.name} className="form-group" style={f.name === 'name' || f.name === 'email' || f.name === 'password' ? { gridColumn: '1/-1' } : {}}>
-                                <label htmlFor={f.name}>{f.label}{f.required && <span style={{ color: 'var(--accent-red)' }}> *</span>}</label>
-                                <input
-                                    id={f.name}
-                                    name={f.name}
-                                    type={f.type}
-                                    placeholder={f.placeholder}
-                                    required={f.required}
-                                    className="input"
-                                    onChange={handleChange}
-                                />
-                            </div>
-                        ))}
-                        <div className="form-group">
-                            <label htmlFor="gender">Gender <span style={{ color: 'var(--accent-red)' }}>*</span></label>
-                            <select id="gender" name="gender" className="input" onChange={handleChange} value={form.gender || 'Male'}>
-                                <option value="Male">Male</option>
-                                <option value="Female">Female</option>
-                                <option value="Other">Other</option>
-                            </select>
+                {/* noValidate hands validation to the app: the browser's own bubbles cannot be
+                    styled, are inconsistent across engines, and vanish on the next click. */}
+                <form onSubmit={submit} id="register-form" noValidate>
+                    <fieldset style={{ border: 'none', marginBottom: 8 }}>
+                        <legend className="form-section-title">Account</legend>
+                        <div className="form-grid">
+                            <FormField
+                                label="Full name" required autoComplete="name"
+                                placeholder="Riya Sharma" wrapperClassName="span-2"
+                                {...form.fieldProps('name')}
+                            />
+                            <FormField
+                                label="Email address" type="email" required autoComplete="email"
+                                placeholder="riya@example.com" wrapperClassName="span-2"
+                                {...form.fieldProps('email')}
+                            />
+                            <FormField
+                                label="Mobile number" type="tel" required autoComplete="tel"
+                                inputMode="numeric" maxLength={10} placeholder="9876543210"
+                                hint="10 digits, starting with 6, 7, 8 or 9."
+                                {...form.fieldProps('mobile')}
+                                onChange={(e) => form.setValue('mobile', e.target.value.replace(/\D/g, '').slice(0, 10))}
+                            />
+                            <FormField
+                                label="Gender" required options={GENDER_OPTIONS}
+                                {...form.fieldProps('gender')}
+                            />
+                            <FormField
+                                label="Password" type="password" required autoComplete="new-password"
+                                placeholder="••••••••"
+                                hint="At least 8 characters, including a letter and a number."
+                                {...form.fieldProps('password')}
+                            />
+                            <FormField
+                                label="Confirm password" type="password" required autoComplete="new-password"
+                                placeholder="••••••••"
+                                {...form.fieldProps('confirm_password')}
+                            />
                         </div>
-                    </div>
+                    </fieldset>
+
+                    <fieldset style={{ border: 'none' }}>
+                        <legend className="form-section-title">Medical profile</legend>
+                        <div className="form-grid">
+                            <FormField
+                                label="Age" type="number" required inputMode="numeric"
+                                min={1} max={120} placeholder="25"
+                                {...form.fieldProps('age')}
+                            />
+                            <FormField
+                                label="Height (inches)" type="number" required
+                                min={20} max={100} placeholder="65"
+                                {...form.fieldProps('height_inches')}
+                            />
+                            <FormField
+                                label="Weight (kg)" type="number"
+                                min={2} max={400} placeholder="60"
+                                {...form.fieldProps('weight_kg')}
+                            />
+                            <FormField
+                                label="Blood group"
+                                options={[{ value: '', label: 'Select…' }, ...BLOOD_GROUP_OPTIONS]}
+                                {...form.fieldProps('blood_group')}
+                            />
+                            <FormField
+                                label="Blood pressure" placeholder="120/80" wrapperClassName="span-2"
+                                hint="Optional — systolic over diastolic."
+                                {...form.fieldProps('blood_pressure')}
+                            />
+                        </div>
+                    </fieldset>
 
                     <button
                         type="submit"
                         className="btn-primary"
                         id="register-submit"
-                        disabled={loading}
+                        disabled={form.submitting}
                         style={{ width: '100%', justifyContent: 'center', marginTop: 24, padding: '14px', fontSize: '1rem' }}
                     >
-                        {loading ? <><div className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} /> Registering...</> : '🩺 Create Account'}
+                        {form.submitting
+                            ? <><span className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} /> Creating account…</>
+                            : 'Create account'}
                     </button>
                 </form>
 
                 <div className="auth-divider">Already have an account?</div>
                 <Link to="/login" className="btn-ghost" style={{ width: '100%', justifyContent: 'center', padding: '12px' }}>
-                    Sign In Instead
+                    Sign in instead
                 </Link>
             </motion.div>
         </div>

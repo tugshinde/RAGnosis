@@ -109,7 +109,6 @@ export default function SystemAnimation() {
                             <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
                                 {/* Node */}
                                 <motion.div
-                                    whileHover={{ scale: 1.05 }}
                                     onClick={() => { setActiveStep(idx); setPlaying(false) }}
                                     style={{ cursor: 'pointer' }}
                                 >

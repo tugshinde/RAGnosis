@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { motion, AnimatePresence } from 'framer-motion'
 import MedicineRemindersTab from '../components/MedicineRemindersTab'
 import HealthCard from '../components/HealthCard'
+import ProfileTab from '../components/ProfileTab'
 import {
     RadarChart, Radar, PolarGrid, PolarAngleAxis,
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -591,8 +592,7 @@ function PrescriptionsTab() {
                                     backgroundColor: 'var(--bg-secondary)',
                                     transition: 'background 0.2s ease'
                                 }}
-                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(0, 212, 170, 0.05)'}
-                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'}
+                                className="list-row"
                             >
                                 {/* Doctor Info */}
                                 <div style={{ flex: 1 }}>
@@ -1243,42 +1243,6 @@ function ChatbotTab({ reports }) {
 // ══════════════════════════════════════════════════════════
 //  PROFILE TAB
 // ══════════════════════════════════════════════════════════
-function ProfileTab({ user }) {
-    return (
-        <div style={{ maxWidth: 560 }}>
-            <h2 style={{ fontWeight: 800, marginBottom: 24, fontSize: '1.5rem' }}>My Profile</h2>
-            <div className="card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
-                    <div style={{ width: 64, height: 64, background: 'var(--gradient-cyan)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', fontWeight: 900, color: '#060d1f' }}>
-                        {user?.name?.[0]?.toUpperCase()}
-                    </div>
-                    <div>
-                        <div style={{ fontWeight: 800, fontSize: '1.2rem' }}>{user?.name}</div>
-                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{user?.email}</div>
-                    </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    {[
-                        ['📧 Email', user?.email],
-                        ['📱 Mobile', user?.mobile || '—'],
-                        ['🎂 Age', user?.age ? `${user.age} years` : '—'],
-                        ['📐 Height', user?.height_inches ? `${user.height_inches} inches` : '—'],
-                        ['⚖️ Weight', user?.weight_kg ? `${user.weight_kg} kg` : '—'],
-                        ['🩸 Blood Group', user?.blood_group || '—'],
-                        ['💉 Blood Pressure', user?.blood_pressure || '—'],
-                        ['👤 Gender', user?.gender || '—'],
-                    ].map(([label, value]) => (
-                        <div key={label} style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: '12px 16px' }}>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
-                            <div style={{ fontWeight: 600 }}>{value || '—'}</div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    )
-}
-
 // ══════════════════════════════════════════════════════════
 //  MAIN DASHBOARD
 // ══════════════════════════════════════════════════════════
@@ -1331,7 +1295,7 @@ export default function Dashboard() {
             case 'reminders': return <MedicineRemindersTab />
             case 'prescriptions': return <PrescriptionsTab />
             case 'chatbot': return <ChatbotTab reports={reports} />
-            case 'profile': return <ProfileTab user={user} />
+            case 'profile': return <ProfileTab />
             default: return null
         }
     }

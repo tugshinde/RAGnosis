@@ -117,8 +117,12 @@ public sealed class AuthController(
         if (request.Gender is not null) updates.Add(Builders<User>.Update.Set(u => u.Gender, request.Gender));
         if (request.HeightInches is not null) updates.Add(Builders<User>.Update.Set(u => u.HeightInches, request.HeightInches));
         if (request.WeightKg is not null) updates.Add(Builders<User>.Update.Set(u => u.WeightKg, request.WeightKg));
-        if (request.BloodPressure is not null) updates.Add(Builders<User>.Update.Set(u => u.BloodPressure, request.BloodPressure));
-        if (request.BloodGroup is not null) updates.Add(Builders<User>.Update.Set(u => u.BloodGroup, request.BloodGroup));
+        // Null means "leave alone"; an empty string is the client clearing the field, which is
+        // stored as null rather than as an empty value the dashboard would render as blank text.
+        if (request.BloodPressure is not null)
+            updates.Add(Builders<User>.Update.Set(u => u.BloodPressure, Blank(request.BloodPressure)));
+        if (request.BloodGroup is not null)
+            updates.Add(Builders<User>.Update.Set(u => u.BloodGroup, Blank(request.BloodGroup)));
 
         if (updates.Count == 0)
             return BadRequestError("No supported fields were supplied.");
@@ -131,6 +135,9 @@ public sealed class AuthController(
 
         return user is null ? NotFoundError("Account not found.") : Ok(Map(user));
     }
+
+    /// <summary>Normalises a cleared optional field to null so it is absent rather than empty.</summary>
+    private static string? Blank(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     [HttpPost("change-password")]
     [Authorize]

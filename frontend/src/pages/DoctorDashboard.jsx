@@ -3,14 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useAuth } from '../context/AuthContext'
 
-// Axios instance with doctor token
-function doctorAxios() {
-    const token = localStorage.getItem('doctor_token')
-    return axios.create({
-        headers: { Authorization: `Bearer ${token}` }
-    })
-}
+// The signed-in session sets the Authorization header on the shared axios default, so this
+// no longer builds its own instance from a portal-specific token.
+const doctorAxios = () => axios
 
 const FREQ_OPTIONS = [
     'Once daily', 'Twice daily', 'Thrice daily',
@@ -339,24 +336,22 @@ const DOC_NAV = [
 
 export default function DoctorDashboard() {
     const navigate = useNavigate()
+    const { user, logout: endSession } = useAuth()
     const [activeTab, setActiveTab] = useState('today')
-    const [doctor, setDoctor] = useState(null)
+    const [doctor, setDoctor] = useState(user)
 
     useEffect(() => {
-        const token = localStorage.getItem('doctor_token')
-        const info = localStorage.getItem('doctor_info')
-        if (!token || !info) { navigate('/doctor/login'); return }
-        setDoctor(JSON.parse(info))
-        // Verify token
-        axios.get('/api/hospital/doctor/me', { headers: { Authorization: `Bearer ${token}` } })
-            .catch(() => { localStorage.removeItem('doctor_token'); navigate('/doctor/login') })
-    }, [navigate])
+        // The route guard has already established that a doctor is signed in; this refreshes
+        // the profile so details edited elsewhere show up without a re-login.
+        axios.get('/api/hospital/doctor/me')
+            .then(res => setDoctor(res.data.doctor ?? res.data))
+            .catch(() => { /* a rejected token is handled by the interceptor and the guard */ })
+    }, [])
 
     const logout = () => {
-        localStorage.removeItem('doctor_token')
-        localStorage.removeItem('doctor_info')
+        endSession()
         toast.success('Logged out')
-        navigate('/doctor/login')
+        navigate('/login', { replace: true })
     }
 
     if (!doctor) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}><div className="spinner" /></div>

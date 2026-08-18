@@ -378,13 +378,13 @@ public sealed class HospitalController(
         var patient = await context.Users.Find(u => u.Id == request.PatientId).FirstOrDefaultAsync(ct);
         if (patient is null) return NotFoundError("Patient not found.");
 
-        // Reuse the patient pipeline so the report lands in their dashboard unchanged.
-        var report = await reports.CreateAndAnalyzeAsync(request.File, patient.Id!, null, ct);
+        // Reuse the patient pipeline so the report lands in their dashboard unchanged — and so
+        // an unreadable or non-clinical document is refused here for the same reasons.
+        var (report, stored) = await reports.CreateAndAnalyzeAsync(request.File, patient.Id!, null, ct);
+
+        if (!stored) return reports.RejectedUpload(report);
 
         await audit.RecordAsync(AuditActions.ReportUploadOnBehalf, patient.Id, report.Id, ct: ct);
-
-        if (report.Status == ReportStatus.Failed)
-            return BadRequest(new ApiError("unreadable", report.ErrorMessage ?? "The report could not be read."));
 
         return Ok(ReportMapper.Map(report));
     }

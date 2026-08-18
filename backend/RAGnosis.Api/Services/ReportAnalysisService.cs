@@ -17,10 +17,20 @@ public sealed class ReportAnalysisService(
     IRecommendationService recommendations,
     ILogger<ReportAnalysisService> logger)
 {
-    public async Task<Report> AnalyzeAsync(Report report, CancellationToken ct = default)
-    {
-        await SetStatusAsync(report.Id!, ReportStatus.Processing, null, ct);
+    /// <summary>
+    /// A report is only worth keeping if the text could be read and at least one clinical
+    /// parameter was recognised. Anything else — a corrupt scan, a holiday photo, a non-medical
+    /// PDF — is not a medical record and must not occupy a slot in the patient's history.
+    /// </summary>
+    public static bool IsUsable(Report report) =>
+        report.Status != ReportStatus.Failed && report.Parameters.Count > 0;
 
+    /// <summary>
+    /// Runs the pipeline against the stored file and fills in the report, touching no
+    /// database. Callers use this to decide whether a report is worth persisting at all.
+    /// </summary>
+    public async Task<Report> AnalyzeInMemoryAsync(Report report, CancellationToken ct = default)
+    {
         try
         {
             var text = await extraction.ExtractAsync(report.StoredPath, report.ContentType, ct);
@@ -39,6 +49,35 @@ public sealed class ReportAnalysisService(
             report.ErrorMessage = null;
             report.AnalyzedAt = DateTime.UtcNow;
 
+            logger.LogInformation(
+                "Analysed {File}: {Count} parameters detected.", report.OriginalName, detected.Count);
+        }
+        catch (Exception ex)
+        {
+            // Recorded on the report rather than thrown, so the caller can explain the failure.
+            logger.LogError(ex, "Analysis failed for {File}.", report.OriginalName);
+            report.Status = ReportStatus.Failed;
+            report.ErrorMessage = ex.Message;
+        }
+
+        return report;
+    }
+
+    /// <summary>Re-runs analysis for a report that is already stored, writing the result back.</summary>
+    public async Task<Report> AnalyzeAsync(Report report, CancellationToken ct = default)
+    {
+        await SetStatusAsync(report.Id!, ReportStatus.Processing, null, ct);
+
+        await AnalyzeInMemoryAsync(report, ct);
+
+        if (report.Status == ReportStatus.Failed)
+        {
+            await SetStatusAsync(report.Id!, ReportStatus.Failed, report.ErrorMessage, ct);
+            return report;
+        }
+
+        try
+        {
             var update = Builders<Report>.Update
                 .Set(r => r.ExtractedText, report.ExtractedText)
                 .Set(r => r.Parameters, report.Parameters)
@@ -51,15 +90,12 @@ public sealed class ReportAnalysisService(
                 .Set(r => r.AnalyzedAt, report.AnalyzedAt);
 
             await context.Reports.UpdateOneAsync(r => r.Id == report.Id, update, cancellationToken: ct);
-
-            logger.LogInformation(
-                "Report {ReportId} analysed: {Count} parameters detected.", report.Id, detected.Count);
-
             return report;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Analysis failed for report {ReportId}.", report.Id);
+            // The analysis itself succeeded; only writing the result back failed.
+            logger.LogError(ex, "Could not persist analysis for report {ReportId}.", report.Id);
 
             report.Status = ReportStatus.Failed;
             report.ErrorMessage = ex.Message;

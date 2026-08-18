@@ -354,16 +354,8 @@ export default function HealthCard() {
                         cursor: 'pointer',
                         fontSize: '13px',
                         fontWeight: '600',
-                        transition: 'all 0.2s'
                     }}
-                    onMouseEnter={(e) => {
-                        e.target.style.backgroundColor = scoreInfo.color
-                        e.target.style.color = '#060d1f'
-                    }}
-                    onMouseLeave={(e) => {
-                        e.target.style.backgroundColor = 'transparent'
-                        e.target.style.color = scoreInfo.color
-                    }}
+                    className="link-toggle"
                 >
                     {showScoreExplanation ? '▼ Hide Details' : '▶ How is this calculated?'}
                 </button>

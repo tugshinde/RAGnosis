@@ -34,26 +34,42 @@ public sealed class ReportsController(
         if (!storage.IsAllowed(request.File, out var reason))
             return BadRequest(new ApiError("unreadable", reason!));
 
-        var report = await CreateAndAnalyzeAsync(request.File, userId, request.ReportType, ct);
+        var (report, stored) = await CreateAndAnalyzeAsync(request.File, userId, request.ReportType, ct);
 
+        if (!stored) return RejectedUpload(report);
+
+        // Audited only once the report is actually part of the record — a rejected upload
+        // leaves nothing behind to reference.
         await audit.RecordAsync(AuditActions.ReportUpload, userId, report.Id, ct: ct);
-
-        // The dashboard shows a dedicated panel when a report can't be read at all.
-        if (report.Status == ReportStatus.Failed)
-            return BadRequest(new ApiError("unreadable", report.ErrorMessage ?? "The report could not be read."));
-
-        if (report.Parameters.Count == 0)
-            return StatusCode(StatusCodes.Status422UnprocessableEntity, new ApiError(
-                "out_of_knowledge_base",
-                "No recognised clinical parameters were found in this document. "
-                + "RAGnosis currently understands common blood panels — please upload a lab report."));
 
         return Ok(ReportMapper.Map(report));
     }
 
-    /// <summary>Shared by the patient upload and the receptionist's on-behalf upload.</summary>
-    internal async Task<Report> CreateAndAnalyzeAsync(IFormFile file, string ownerId, string? reportType, CancellationToken ct)
+    /// <summary>
+    /// Explains why an upload was refused. Nothing was stored, so these responses carry no
+    /// report id — the client shows the message and the user tries a different document.
+    /// </summary>
+    internal ActionResult RejectedUpload(Report report) =>
+        report.Status == ReportStatus.Failed
+            ? BadRequest(new ApiError("unreadable",
+                report.ErrorMessage ?? "The report could not be read, so it was not saved."))
+            : StatusCode(StatusCodes.Status422UnprocessableEntity, new ApiError(
+                "out_of_knowledge_base",
+                "No recognised clinical parameters were found in this document, so it was not saved. "
+                + "RAGnosis currently understands common blood panels — please upload a lab report."));
+
+    /// <summary>
+    /// Shared by the patient upload and the receptionist's on-behalf upload.
+    ///
+    /// Analysis runs <em>before</em> anything is written, so a document that turns out to be
+    /// unreadable or not a lab report leaves no trace: no report row, no stub on the user, no
+    /// file on disk, and nothing added to the patient's report count.
+    /// </summary>
+    /// <returns>The analysed report, and whether it was good enough to keep.</returns>
+    internal async Task<(Report Report, bool Stored)> CreateAndAnalyzeAsync(
+        IFormFile file, string ownerId, string? reportType, CancellationToken ct)
     {
+        // The file has to land on disk first — extraction reads it from there.
         var (storedPath, _) = await storage.SaveAsync(file, ownerId, ct);
 
         var report = new Report
@@ -67,6 +83,26 @@ public sealed class ReportsController(
             Status = ReportStatus.Pending,
             UploadedAt = DateTime.UtcNow
         };
+
+        await analysis.AnalyzeInMemoryAsync(report, ct);
+
+        if (!ReportAnalysisService.IsUsable(report))
+        {
+            // Nothing was written, so there is nothing to roll back except the upload itself.
+            // Keeping it would leave an orphaned file no record points at.
+            try { storage.Delete(storedPath); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not delete the rejected upload at {Path}.", storedPath);
+            }
+
+            logger.LogInformation(
+                "Rejected upload {File} for {UserId}: {Reason}.",
+                report.OriginalName, ownerId,
+                report.Status == ReportStatus.Failed ? report.ErrorMessage : "no clinical parameters found");
+
+            return (report, false);
+        }
 
         // --- Two-write pattern -------------------------------------------------
         // Write 1: the report document itself, which is the source of truth.
@@ -95,7 +131,7 @@ public sealed class ReportsController(
         }
         // -----------------------------------------------------------------------
 
-        return await analysis.AnalyzeAsync(report, ct);
+        return (report, true);
     }
 
     [HttpGet("")]

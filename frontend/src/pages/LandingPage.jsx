@@ -48,8 +48,8 @@ const PORTALS = [
         color: '#00c2ff',
         gradient: 'linear-gradient(135deg,rgba(0,194,255,0.12),rgba(0,194,255,0.04))',
         border: 'rgba(0,194,255,0.3)',
-        loginLink: '/doctor/login',
-        registerLink: '/doctor/login',
+        loginLink: '/login',
+        registerLink: '/register/staff',
         demoLabel: '📧 doctor@ragnosis.dev  🔑 demo1234',
         demo: 'doctor',
     },
@@ -60,8 +60,8 @@ const PORTALS = [
         color: '#a855f7',
         gradient: 'linear-gradient(135deg,rgba(168,85,247,0.12),rgba(168,85,247,0.04))',
         border: 'rgba(168,85,247,0.3)',
-        loginLink: '/receptionist/login',
-        registerLink: '/receptionist/login',
+        loginLink: '/login',
+        registerLink: '/register/staff',
         demoLabel: '📧 reception@ragnosis.dev  🔑 demo1234',
         demo: 'receptionist',
     },
@@ -176,7 +176,7 @@ export default function LandingPage() {
                             RAGnosis connects patients, doctors and receptionists in one integrated system.
                         </p>
                         <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                            <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                            <motion.button whileTap={{ scale: 0.97 }}
                                 onClick={seedDemo} disabled={seeding || seeded}
                                 style={{
                                     padding: '10px 28px', borderRadius: 99, border: '1px solid rgba(0,212,170,0.4)',
